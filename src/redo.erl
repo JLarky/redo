@@ -65,19 +65,31 @@ cmd(NameOrPid, Cmd, Timeout) when is_integer(Timeout) ->
     %% format commands to be sent to redis
     Packets = redo_redis_proto:package(Cmd),
 
+    % If we get [["ping"]], we need to return ["pong"]
+    % Need to differentiate between list of lists and list of string:
+    Wrap = case Cmd of
+        [[X | _]] when is_integer(X) -> undefined;
+        [X] when is_list(X) -> wrap;
+        _ -> undefined
+    end,
+    
     %% send the commands and receive back
     %% unique refs for each packet sent
     Refs = gen_server:call(NameOrPid, {cmd, Packets}, 2000),
-    receive_resps(NameOrPid, Refs, Timeout).
+    receive_resps(NameOrPid, Refs, Wrap, Timeout).
 
-receive_resps(_NameOrPid, {error, Err}, _Timeout) ->
+receive_resps(_NameOrPid, {error, Err}, _, _Timeout) ->
     {error, Err};
 
-receive_resps(NameOrPid, [Ref], Timeout) ->
+receive_resps(NameOrPid, [Ref], wrap, Timeout) ->
+    %% for a single [cmd], receive a single [reply]
+    [receive_resp(NameOrPid, Ref, Timeout)];
+
+receive_resps(NameOrPid, [Ref], _, Timeout) ->
     %% for a single packet, receive a single reply
     receive_resp(NameOrPid, Ref, Timeout);
 
-receive_resps(NameOrPid, Refs, Timeout) ->
+receive_resps(NameOrPid, Refs, _, Timeout) ->
     %% for multiple packets, build a list of replies
     [receive_resp(NameOrPid, Ref, Timeout) || Ref <- Refs].
 
