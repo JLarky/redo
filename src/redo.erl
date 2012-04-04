@@ -75,7 +75,7 @@ cmd(NameOrPid, Cmd, Timeout) when is_integer(Timeout) ->
         [X] when is_list(X) -> wrap;
         _ -> undefined
     end,
-    
+
     %% send the commands and receive back
     %% unique refs for each packet sent
     Refs = gen_server:call(NameOrPid, {cmd, Packets}, 2000),
