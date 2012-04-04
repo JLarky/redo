@@ -1,5 +1,5 @@
 %% Copyright (c) 2011 Jacob Vorreuter <jacob.vorreuter@gmail.com>
-%% 
+%%
 %% Permission is hereby granted, free of charge, to any person
 %% obtaining a copy of this software and associated documentation
 %% files (the "Software"), to deal in the Software without
@@ -8,10 +8,10 @@
 %% copies of the Software, and to permit persons to whom the
 %% Software is furnished to do so, subject to the following
 %% conditions:
-%% 
+%%
 %% The above copyright notice and this permission notice shall be
 %% included in all copies or substantial portions of the Software.
-%% 
+%%
 %% THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
 %% EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
 %% OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
@@ -27,7 +27,7 @@
 -export([init/1, handle_call/3, handle_cast/2,
          handle_info/2, terminate/2, code_change/3]).
 
--export([start_link/0, start_link/1, start_link/2, 
+-export([start_link/0, start_link/1, start_link/2,
          cmd/1, cmd/2, cmd/3, subscribe/1, subscribe/2]).
 
 -record(state, {host, port, pass, db, sock, queue, subscriber, cancelled, acc, buffer}).
@@ -38,7 +38,9 @@
 start_link() ->
     start_link([]).
 
--spec start_link(atom()) -> {ok, pid()} | {error, term()}.
+-spec start_link(atom() | list()) ->
+                        {ok, pid()} |
+                        {error, term()}.
 start_link(Name) when is_atom(Name) ->
     start_link(Name, []);
 
@@ -52,15 +54,16 @@ start_link(undefined, Opts) when is_list(Opts) ->
 start_link(Name, Opts) when is_atom(Name), is_list(Opts) ->
     gen_server:start_link({local, Name}, ?MODULE, [Opts], []).
 
--spec cmd(list() | binary()) -> list() | binary() | integer().
 cmd(Cmd) ->
     cmd(?MODULE, Cmd, ?TIMEOUT).
 
--spec cmd(atom() | pid(), list() | binary()) -> list() | binary() | integer().
 cmd(NameOrPid, Cmd) ->
     cmd(NameOrPid, Cmd, ?TIMEOUT).
 
--spec cmd(atom() | pid(), list() | binary(), integer()) -> list() | binary() | integer().
+-spec cmd(atom() | pid(), list() | binary(), integer()) ->
+                 integer() | binary() | {'error', Reason::term()} |
+                 [integer() | binary() | {'error', Reason::term()}].
+
 cmd(NameOrPid, Cmd, Timeout) when is_integer(Timeout) ->
     %% format commands to be sent to redis
     Packets = redo_redis_proto:package(Cmd),
@@ -132,7 +135,7 @@ init([Opts]) ->
         State1 when is_record(State1, state) ->
             {ok, State1};
         Err ->
-            {stop, Err, State}
+            {stop, Err}
     end.
 
 %%--------------------------------------------------------------------
@@ -171,8 +174,7 @@ handle_call({cmd, Packets}, {From, _Ref}, #state{subscriber=undefined, queue=Que
                 Err ->
                     {stop, Err, State1}
             end;
-        Err ->
-            error_logger:error_report({connect, Err}),
+        _Err ->
             %% failed to connect, retry
             {reply, {error, closed}, State#state{sock=undefined}, 1000}
     end;
@@ -190,8 +192,7 @@ handle_call({subscribe, Packet}, {From, _Ref}, State) ->
                 Err ->
                     {stop, Err, State1}
             end;
-        Err ->
-            error_logger:error_report({connect, Err}),
+        _Err ->
             %% failed to connect, retry
             {reply, {error, closed}, State#state{sock=undefined}, 1000}
     end;
@@ -231,8 +232,6 @@ handle_info({tcp, Sock, Data}, #state{sock=Sock, buffer=Buffer}=State) ->
     end;
 
 handle_info({tcp_closed, Sock}, #state{sock=Sock, queue=Queue}=State) ->
-    error_logger:error_report(tcp_closed),
-
     %% notify all waiting pids that the connection is closed
     %% so that they may try resending their requests
     [Pid ! {Ref, closed} || {Pid, Ref} <- queue:to_list(Queue)],
@@ -254,13 +253,11 @@ handle_info({tcp_closed, Sock}, #state{sock=Sock, queue=Queue}=State) ->
     case connect(State1) of
         State2 when is_record(State2, state) ->
             {noreply, State2};
-        Err ->
-            error_logger:error_report({connect, Err}),
+        _Err ->
             {noreply, State1#state{sock=undefined}, 1000}
     end;
 
 handle_info({tcp_error, Sock, Reason}, #state{sock=Sock}=State) ->
-    error_logger:error_report([tcp_error, Reason]),
     {stop, Reason, State};
 
 %% attempt to reconnect to redis
@@ -268,8 +265,7 @@ handle_info(timeout, State) ->
     case connect(State) of
         State1 when is_record(State1, state) ->
             {noreply, State1};
-        Err ->
-            error_logger:error_report({connect, Err}),
+        _Err ->
             {noreply, State#state{sock=undefined}, 1000}
     end;
 
