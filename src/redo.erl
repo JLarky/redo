@@ -85,7 +85,7 @@ cmd(NameOrPid, Cmd, Timeout) when is_integer(Timeout) ->
     receive_resps(NameOrPid, Refs, Wrap, Timeout).
 
 receive_resps(_NameOrPid, {error, Err}, _, _Timeout) ->
-    {error, Err};
+    erlang:error({error, Err});
 
 receive_resps(NameOrPid, [Ref], wrap, Timeout) ->
     %% for a single [cmd], receive a single [reply]
@@ -103,13 +103,15 @@ receive_resp(NameOrPid, Ref, Timeout) ->
     receive
         %% the connection to the redis server was closed
         {Ref, closed} ->
-            {error, closed};
+            erlang:error({error, closed});
+        {Ref, {error, Error}} ->
+            erlang:error({error, Error});
         {Ref, Val} ->
             Val
     %% after the timeout expires, cancel the command and return
     after Timeout ->
             gen_server:cast(NameOrPid, {cancel, Ref}),
-            {error, timeout}
+            erlang:error({error, timeout})
     end.
 
 -spec subscribe(list() | binary()) -> reference() | {error, term()}.
